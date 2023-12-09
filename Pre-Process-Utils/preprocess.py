@@ -28,6 +28,8 @@ def read_data_csv(fpath,labels_path):
     count_stims  = count_stims//2
     labels_data  = pd.read_csv(labels_path)
     labels_data  = labels_data.loc[:,['response','is_target']]
+    labels_data['response'].fillna(value = 'not_cat',inplace=True)
+    
     count_images = labels_data.shape[0]
     assert count_stims == count_images, "The files are not same !!! Search for relevant files" 
     # Write function to match the images and the trigger. 
@@ -49,16 +51,24 @@ def read_data_csv(fpath,labels_path):
             if labels_data.iloc[j,0] == 'space':
                 if labels_data.iloc[j,1] == 1:
                     data.iloc[i:i+n,event] = 'correctly_identified'
+                    print('Gone 1')
                 elif labels_data.iloc[j,1] == 0:
-                    data.iloc[i:i+n,event] == 'incorrectly_identified'
-            elif labels_data.iloc[j,0] == None:
-                if labels_data.iloc[j,1] == 1:
+                    data.iloc[i:i+n,event] = 'incorrectly_identified'
+                    print('Gone 2')
+
+            elif labels_data.iloc[j,0] == "not_cat":
+                
+                if labels_data.iloc[j,1]   == 1:
                     data.iloc[i:i+n,event] = 'not_identified'
+                    print('Gone 3')
                 elif labels_data.iloc[j,1] == 0:
                     data.iloc[i:i+n,event] = 'correclty_not_identified'
+                    print('Gone 4')
+            print('Index {}'.format(i))
+            print('Case  {}'.format(j))
             j += 1
             i  = i+n
-        else:
+        elif trig[i] == 0:
             data.iloc[i,event] = 'Rest'
             i+=1
         
@@ -70,21 +80,40 @@ labels_path =  "/home/sultm0a/Documents/eeg_data_image_editing/12_oct/kilich_odd
 
 
 
+
 data, stims,actual_shown  = read_data_csv(fpath, labels_path)
 data.to_csv("/home/sultm0a/Documents/eeg_data_image_editing/12_oct/kilich_oddball_test_2023-10-12_19h36.41.organised.csv")
+
+req_data  = ['P3', 'C3', 'F3', 'Fz', 'F4', 'C4', 'P4', 'Cz', 'A1', 'Fp1',
+       'Fp2', 'T3', 'T5', 'O1', 'O2', 'F7', 'F8', 'A2', 'T6',
+       'T4', 'Pz']
+ch_types = ['eeg'] * len(req_data)
+
+def re_reference_to_LE(data):
+    ref_df = data.copy()
+    ref_df['LE'] = (ref_df['A1'] + ref_df['A2'])/2
+    ref_df[req_data] = ref_df[req_data].values - ref_df['LE'].values.reshape(-1, 1)
+    return ref_df
+
+
 
 print(data.head())
 print("Total Images shown in this experiment = {}".format(stims))
 print("Total Images shown in this experiment = {}".format(actual_shown))
 sampling_rate = 300;
 
-"""
-df = data.iloc[:,1:25]
 
+
+df = data.loc[:,req_data]
+
+montage = mne.channels.make_standard_montage('standard_1005')
+ch_names = df.columns.tolist()
 raw_array = mne.io.RawArray(df.values.T, 
-                            info=mne.create_info(ch_names=df.columns.tolist(), sfreq=sampling_rate))
-raw_array.set_channel_types = 'eeg'
+                            info=mne.create_info(ch_names=ch_names, sfreq=sampling_rate, ch_types=ch_types))
+raw_array.set_montage(montage)
 
+
+"""
 fig  = raw_array.compute_psd(tmax = np.inf, fmax  = 150,picks = 'Fp2').plot(picks = 'Fp2')
 for ax in fig.axes[0:]:
     freqs = ax.lines[-1].get_xdata()
@@ -103,5 +132,54 @@ for ax in fig.axes[0:]:
         )
 
 plt.show()
-
 """
+event_labels = data['Event'].values
+
+events = []
+
+# Define event_id mapping
+event_id_mapping = {'Rest': 0, 'correctly_identified': 1, 
+                    "correclty_not_identified":2,
+                    'incorrectly_identified': 3,
+                    'not_identified':4
+                    }  # Add more events as needed
+
+
+# Identify the onset and offset of each event
+events_onset = []
+events_offset = []
+current_event = event_labels[0]
+onset = 0
+
+for i, label in enumerate(event_labels[1:], start=1):
+    if label != current_event:
+        events_onset.append(onset)
+        events_offset.append(i - 1)
+        onset = i
+        current_event = label
+
+# Add the last event
+events_onset.append(onset)
+events_offset.append(len(event_labels) - 1)
+
+print(event_labels[0])
+print(len(events_onset))
+print(len(events_offset))
+print(event_labels[events_onset])
+# Create events as (onset, duration, event_id)
+events = [[onset, offset - onset + 1, event_id_mapping[current_event]] for onset, offset, current_event in zip(events_onset, events_offset, event_labels[events_onset])]
+
+print(events)
+
+events_array = np.array(events)
+#epochs = mne.Epochs(raw_array, events_array, event_id=event_id_mapping, tmin=0, tmax= 0.1, baseline=None, preload=True)
+
+raw_ica  = raw_array.copy()
+
+random_state = 32   # ensures ICA is reproducable each time it's run
+ica_n_components = .99     # Specify n_components as a decimal to set % explained variance
+ica = mne.preprocessing.ICA(
+n_components=0.99, method="fastica", max_iter="auto", random_state=97)
+ica.fit(raw_ica)
+ica.plot_components()
+plt.show()
