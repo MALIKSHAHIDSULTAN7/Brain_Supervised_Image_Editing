@@ -84,15 +84,18 @@ labels_path =  "/home/sultm0a/Documents/eeg_data_image_editing/12_oct/kilich_odd
 data, stims,actual_shown  = read_data_csv(fpath, labels_path)
 data.to_csv("/home/sultm0a/Documents/eeg_data_image_editing/12_oct/kilich_oddball_test_2023-10-12_19h36.41.organised.csv")
 
-req_data  = ['P3', 'C3', 'F3', 'Fz', 'F4', 'C4', 'P4', 'Cz', 'A1', 'Fp1',
-       'Fp2', 'T3', 'T5', 'O1', 'O2', 'F7', 'F8', 'A2', 'T6',
-       'T4', 'Pz']
-ch_types = ['eeg'] * len(req_data)
+req_data  = ['P3', 'C3', 'F3', 'Fz', 'F4', 'C4', 'P4', 'Cz', 'Fp1',
+       'Fp2', 'T3', 'T5', 'O1', 'O2', 'F7', 'F8', 'T6',
+       'T4', 'Pz','Trigger']
+ch_types = ['eeg' if i != 'Trigger' else 'stim' for i in req_data]
 
 def re_reference_to_LE(data):
     ref_df = data.copy()
     ref_df['LE'] = (ref_df['A1'] + ref_df['A2'])/2
-    ref_df[req_data] = ref_df[req_data].values - ref_df['LE'].values.reshape(-1, 1)
+    channels = ['P3', 'C3', 'F3', 'Fz', 'F4', 'C4', 'P4', 'Cz', 'Fp1',
+       'Fp2', 'T3', 'T5', 'O1', 'O2', 'F7', 'F8', 'T6',
+       'T4', 'Pz']
+    ref_df[channels] = ref_df[channels].values - ref_df['LE'].values.reshape(-1, 1)
     return ref_df
 
 
@@ -103,8 +106,9 @@ print("Total Images shown in this experiment = {}".format(actual_shown))
 sampling_rate = 300;
 
 
-
-df = data.loc[:,req_data]
+df = re_reference_to_LE(data)
+df = df[req_data]
+print(df.head())
 
 montage = mne.channels.make_standard_montage('standard_1005')
 ch_names = df.columns.tolist()
@@ -113,7 +117,7 @@ raw_array = mne.io.RawArray(df.values.T,
 raw_array.set_montage(montage)
 
 
-"""
+
 fig  = raw_array.compute_psd(tmax = np.inf, fmax  = 150,picks = 'Fp2').plot(picks = 'Fp2')
 for ax in fig.axes[0:]:
     freqs = ax.lines[-1].get_xdata()
@@ -132,7 +136,7 @@ for ax in fig.axes[0:]:
         )
 
 plt.show()
-"""
+
 event_labels = data['Event'].values
 
 events = []
@@ -163,18 +167,30 @@ events_onset.append(onset)
 events_offset.append(len(event_labels) - 1)
 
 print(event_labels[0])
+
 print(len(events_onset))
+
 print(len(events_offset))
+
 print(event_labels[events_onset])
+
 # Create events as (onset, duration, event_id)
 events = [[onset, offset - onset + 1, event_id_mapping[current_event]] for onset, offset, current_event in zip(events_onset, events_offset, event_labels[events_onset])]
 
 print(events)
 
 events_array = np.array(events)
-#epochs = mne.Epochs(raw_array, events_array, event_id=event_id_mapping, tmin=0, tmax= 0.1, baseline=None, preload=True)
+events_array[:,1] = 0
+events = mne.find_events(raw_array,'Trigger', initial_event='False',consecutive=False)
+print(50*'#')
+print(events)
+print(events.shape)
+epochs = mne.Epochs(raw_array, events, tmin=-0.2, tmax= 0.4, baseline= (None, 0), preload=True)
 
-raw_ica  = raw_array.copy()
+
+fig = epochs.plot(picks = 'Fp2', events = events_array)
+plt.show()
+raw_ica  = epochs.copy()
 
 random_state = 32   # ensures ICA is reproducable each time it's run
 ica_n_components = .99     # Specify n_components as a decimal to set % explained variance
